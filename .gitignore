@@ -1,0 +1,15 @@
+# 生成结果 (可随时重新生成, 不入库)
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# 日志
+*.log

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拼豆图纸生成器</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>🧩 拼豆图纸生成器</h1>
+  <span class="sub">任意图 → MARD 色卡拼豆图纸 · 矢量输出 · 按色施工 · 手动精修</span>
+</header>
+
+<main>
+  <section id="uploadPanel" class="panel">
+    <div id="dropZone">
+      <input type="file" id="fileInput" accept="image/*" hidden>
+      <div class="dz-inner">
+        <div class="dz-icon">🖼️</div>
+        <p><strong>点击或拖入图片</strong></p>
+        <p class="muted">PNG / JPG / WebP，建议选细节清晰的图</p>
+      </div>
+    </div>
+    <div id="previewWrap" class="hidden">
+      <img id="previewImg" alt="预览">
+      <button id="btnChange" class="ghost">换一张</button>
+    </div>
+
+    <div class="controls">
+      <label>图纸宽度
+        <span class="tip">横向豆数</span>
+        <input type="number" id="width" value="80" min="8" max="220" step="1">
+      </label>
+      <label>取色模式
+        <select id="mode">
+          <option value="plain">逐点取色 — 色块干净，适合图案/像素画</option>
+          <option value="dither">误差抖动 — 色彩过渡自然，适合照片</option>
+          <option value="limited">限制颜色 — 控制在 N 色内，省材料</option>
+        </select>
+      </label>
+      <label>降采样算法
+        <select id="algo">
+          <option value="plain">LANCZOS 逐点 — 经典，细节柔和</option>
+          <option value="mode">区域主流色 — 色块锐利，抑制噪点</option>
+          <option value="edge">内容自适应 — 边缘感知，最保形状（论文算法）</option>
+        </select>
+      </label>
+      <label>孤立豆清理
+        <select id="despeckle">
+          <option value="0">关</option>
+          <option value="2">清理孤立豆（推荐）</option>
+          <option value="3">清理 ≤2 连通块</option>
+          <option value="4">清理 ≤3 连通块（最干净）</option>
+        </select>
+      </label>
+      <label>相似色合并
+        <span class="tip">CIEDE2000 阈值，0=关</span>
+        <input type="number" id="mergeTh" value="0" min="0" max="20" step="0.5">
+      </label>
+      <label id="colorsLabel" class="hidden">限色数量
+        <input type="number" id="colors" value="24" min="2" max="64">
+      </label>
+      <label>色差算法
+        <select id="metric">
+          <option value="ciede2000">CIEDE2000（推荐，最接近人眼）</option>
+          <option value="lab">CIE Lab 欧氏距离（快）</option>
+        </select>
+      </label>
+      <label>色卡范围
+        <select id="series">
+          <option value="">全部 291 色</option>
+          <option value="A-HM">标准 221 色（A–H + M）</option>
+          <option value="ABCD">A–D（黄绿蓝紫）</option>
+          <option value="EF">E–F（肤色/红）</option>
+          <option value="GH">G–H（棕灰黑白）</option>
+        </select>
+      </label>
+      <button id="btnGo" class="primary">生成图纸</button>
+    </div>
+  </section>
+
+  <section id="resultPanel" class="panel hidden">
+    <div id="statsBar"></div>
+    <div class="tabs">
+      <button class="tab" data-tab="overview">总览</button>
+      <button class="tab active" data-tab="grid">施工图纸</button>
+      <button class="tab" data-tab="bycolor">按色施工</button>
+      <button class="tab" data-tab="edit">精修</button>
+      <button class="tab" data-tab="iron">熨烫预览</button>
+      <button class="tab" data-tab="compare">原图对比</button>
+      <button class="tab" data-tab="beads">用豆清单</button>
+    </div>
+
+    <!-- 总览 -->
+    <div id="tab-overview" class="tabbody hidden">
+      <div class="svg-holder" id="svgOverview"></div>
+    </div>
+
+    <!-- 施工图纸: canvas 渲染, 放大始终清晰 -->
+    <div id="tab-grid" class="tabbody">
+      <div class="grid-toolbar">
+        <button class="ghost" id="gzOut">−</button>
+        <span id="gzVal">100%</span>
+        <button class="ghost" id="gzIn">＋</button>
+        <button class="ghost" id="gzFit">适应窗口</button>
+        <button class="ghost" id="gz100">1:1</button>
+        <span class="muted">｜ 显示板框
+          <input type="checkbox" id="showBoards" checked>
+          <label for="showBoards" class="inline">29×29 板界 + 5×5 定位线</label>
+        </span>
+        <span class="muted" id="gridHover"></span>
+      </div>
+      <div class="canvas-wrap" id="gridWrap"><canvas id="gridCanvas"></canvas></div>
+      <p class="muted center">canvas 渲染: 每次放大都按屏幕像素重绘, 放多大都清晰 · 打印用下方 SVG/PNG 下载</p>
+    </div>
+
+    <!-- 按色施工 -->
+    <div id="tab-bycolor" class="tabbody hidden">
+      <div class="bycolor-layout">
+        <div class="color-list" id="colorList"></div>
+        <div class="bycolor-main">
+          <div class="bycolor-head">
+            <span id="bycolorTitle">选择左侧颜色</span>
+            <label class="inline muted"><input type="checkbox" id="hideDone" checked> 灰显已完成颜色</label>
+            <button class="ghost" id="btnResetProgress">重置进度</button>
+          </div>
+          <div class="panzoom-wrap" id="byColorWrap">
+            <canvas id="byColorCanvas"></canvas>
+          </div>
+          <div class="panzoom-bar">
+            <button class="ghost" id="bzOut">−</button>
+            <span id="bzVal">适应</span>
+            <button class="ghost" id="bzIn">＋</button>
+            <button class="ghost" id="bzFit">适应窗口</button>
+            <button class="ghost" id="bzReset">1:1</button>
+            <span class="muted">拖拽移动 · ⌘/Ctrl+滚轮缩放</span>
+          </div>
+          <div class="progress-row">
+            <div class="progress-bar"><div id="progressFill"></div></div>
+            <span id="progressText">0%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 精修 -->
+    <div id="tab-edit" class="tabbody hidden">
+      <div class="bycolor-layout">
+        <div class="edit-side">
+          <div class="muted" style="margin-bottom:6px">点击画布上的格子换色; 再点一次撤销</div>
+          <input type="search" id="editSearch" placeholder="搜索色号, 如 M1 / H19" class="edit-search">
+          <div class="edit-series-tabs" id="editSeriesTabs"></div>
+          <div class="color-list compact" id="editColorList"></div>
+          <div class="edit-actions">
+            <button class="ghost" id="btnUndo">↩ 撤销</button>
+            <button class="ghost" id="btnResetEdit">还原</button>
+          </div>
+          <div id="editLog" class="muted small"></div>
+        </div>
+        <div class="bycolor-main">
+          <div class="bycolor-head">
+            <span>当前画笔: <strong id="editCurCode">-</strong>
+              <span class="sw small" id="editCurSw"></span></span>
+            <label class="inline muted"><input type="checkbox" id="editShowAll" checked> 显示全部颜色</label>
+          </div>
+          <div class="canvas-wrap" id="editWrap"><canvas id="editCanvas"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 熨烫预览 -->
+    <div id="tab-iron" class="tabbody hidden">
+      <div class="iron-tree">
+        <div class="iron-axis" id="ironAxisA"><h4>① 熔合程度</h4><div class="iron-opts"></div></div>
+        <div class="iron-axis" id="ironAxisB"><h4>② 熨烫面</h4><div class="iron-opts"></div></div>
+        <div class="iron-axis" id="ironAxisC"><h4>③ 表面纹理 (介质压纹)</h4><div class="iron-opts"></div></div>
+      </div>
+      <div class="iron-body">
+        <div class="iron-view"><div class="svg-holder" id="ironView"></div></div>
+        <div class="iron-info" id="ironInfo"></div>
+      </div>
+    </div>
+
+    <!-- 原图对比 -->
+    <div id="tab-compare" class="tabbody hidden">
+      <div class="compare">
+        <figure><figcaption>原图</figcaption><img id="cmpOrig" alt="原图"></figure>
+        <figure><figcaption>拼豆效果</figcaption><div class="svg-holder" id="svgPreview"></div></figure>
+      </div>
+    </div>
+
+    <!-- 用豆清单 -->
+    <div id="tab-beads" class="tabbody hidden">
+      <table id="beadsTable"><thead><tr>
+        <th>#</th><th>色块</th><th>色号</th><th>数量</th><th>占比</th><th>RGB</th>
+      </tr></thead><tbody></tbody></table>
+      <div class="downloads">
+        <a id="dlCsv" class="ghost" download>⬇ CSV</a>
+        <a id="dlGridSvg" class="ghost" download target="_blank">⬇ 施工 SVG</a>
+        <a id="dlOverviewSvg" class="ghost" download target="_blank">⬇ 总览 SVG</a>
+        <a id="dlHtml" class="ghost" download target="_blank">⬇ A4 打印版</a>
+        <a id="dlPng" class="ghost" download>⬇ PNG</a>
+        <a id="dlJson" class="ghost" download>⬇ pattern.json</a>
+      </div>
+    </div>
+  </section>
+
+  <div id="loading" class="hidden">
+    <div class="spinner"></div><p id="loadingMsg">正在匹配颜色…</p>
+  </div>
+  <div id="error" class="hidden"></div>
+</main>
+
+<footer>MARD 色卡 291 色 · CIEDE2000 匹配 · 标准 29×29 拼豆板分板 · 实物颜色请以实体豆为准</footer>
+<script src="app.js"></script>
+</body>
+</html>
