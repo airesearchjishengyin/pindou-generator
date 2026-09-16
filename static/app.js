@@ -114,7 +114,7 @@ function modeName(m) {
 }
 
 function algoName(a) {
-  return { plain: "LANCZOS", mode: "区域主流色", edge: "内容自适应" }[a] || a;
+  return { plain: "LANCZOS", mode: "区域主流色", mode4: "4x超采样", edge: "内容自适应" }[a] || a;
 }
 
 async function loadSvg(sel, fname) {

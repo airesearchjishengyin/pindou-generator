@@ -291,6 +291,45 @@ def merge_similar_codes(codes, pal_rgb, idx_map, threshold):
             lut[b] = a
     return lut[idx_map], merged
 
+def mode4_supersample(rgb_img, W, H, pal_lab, pal_c, match, dark_guard=True):
+    """4x 超采样 + 多数投票降采样 (BeadCraft/PixArt-Beads 管线核心)。
+    1. LANCZOS 下采样到 4W×4H (抗混叠)
+    2. 在 4x 分辨率量化到色卡 (众数投票用 Lab 欧氏粗匹配, 快)
+    3. 每 4×4 块多数投票 → 目标网格 (色块干净)
+    4. hybrid: 若块内主导色票数占比过低 (颜色混杂的边缘区),
+       改用块内平均色做精确 CIEDE2000 匹配, 保边缘过渡准确。
+    全向量化 (bincount 众数 + 整块平均), 无 Python 逐块循环。"""
+    n_pal = len(pal_lab)
+    im4 = np.asarray(rgb_img.resize((W * 4, H * 4), Image.LANCZOS), dtype=np.float64)
+    lab4 = srgb_to_lab(im4.reshape(-1, 3))
+    # 粗匹配: Lab 欧氏 + 暗部保护 (分块避免大数组), 众数对近似不敏感
+    idx4 = np.empty(len(lab4), dtype=np.int32)
+    for s in range(0, len(lab4), 8192):
+        e = min(s + 8192, len(lab4))
+        d = np.linalg.norm(lab4[s:e, None, :] - pal_lab[None, :, :], axis=2)
+        if dark_guard:
+            d = d + dark_penalty(lab4[s:e], pal_lab, pal_c)
+        idx4[s:e] = np.argmin(d, axis=1)
+    idx4 = idx4.reshape(H * W, 16)                            # 每块 16 格
+    # 一次 bincount 求所有块的众数
+    flat = idx4 + np.arange(H * W)[:, None] * n_pal
+    counts = np.bincount(flat.ravel(), minlength=H * W * n_pal).reshape(H * W, n_pal)
+    best = counts.argmax(1)
+    p = counts.max(1) / 16.0
+    # 块内平均色精确匹配 (全部块, 向量化)
+    avg = im4.reshape(H, 4, W, 4, 3).mean(axis=(1, 3)).reshape(-1, 3)   # (H*W,3)
+    lab_avg = srgb_to_lab(avg)
+    d = ciede2000(lab_avg[:, None, :], pal_lab[None, :, :])
+    if dark_guard:
+        d = d + dark_penalty(lab_avg, pal_lab, pal_c)
+    avg_best = np.argmin(d, axis=1)
+    # 双条件保留众数: 票数占比高 且 众数色与平均色近邻 (ΔE≤8)
+    # 否则退回平均色精确匹配 — 渐变区(如人脸晕涂)用平均色才准,
+    # 一致区(大面积纯色)用众数保持色块干净锐利
+    mode_ok = (p >= 0.50) & (d[np.arange(H * W), best] <= 8.0)
+    best = np.where(mode_ok, best, avg_best)
+    return best.reshape(H, W).astype(np.int32)
+
 # ------------------------------------------------------------ 抖动 ----
 def floyd_steinberg(lab_img, pal_lab, dark_guard=True, pal_c=None,
                     chroma_diffusion=0.0):
@@ -704,6 +743,29 @@ def generate(img, width=80, mode="plain", metric="ciede2000", series=None,
                                     max(1, round(img.height / img.width * width)))
         W, H = width, max(1, round(img.height / img.width * width))
         small = Image.fromarray(small_rgb)
+    elif algo == "mode4":
+        W, H = width, max(1, round(img.height / img.width * width))
+        # mode4 直接输出最终索引图, 跳过下面的 lab/匹配
+        pal_c4 = np.hypot(pal_lab[:, 1], pal_lab[:, 2])
+        idx_map = mode4_supersample(img.convert("RGB"), W, H, pal_lab, pal_c4,
+                                    match, dark_guard=True)
+        merged_info = []
+        if merge_th and merge_th > 0:
+            idx_map, merged_info = merge_similar_codes(codes, pal_rgb, idx_map, merge_th)
+        if despeckle_n and despeckle_n >= 2:
+            idx_map = despeckle(idx_map, min_run=despeckle_n)
+        counts = Counter(codes[j] for j in idx_map.ravel())
+        stem = os.path.splitext(os.path.basename(src_name))[0]
+        outdir = os.path.join(HERE, "output", f"{stem}_{W}_{mode}mode4")
+        params = {"image": src_name, "width": width, "mode": mode, "metric": metric,
+                  "series": series, "colors": n_colors, "algo": algo,
+                  "despeckle_n": despeckle_n, "merge_th": merge_th}
+        stats = write_outputs(idx_map, codes, pal_rgb, counts, src_name, params, outdir)
+        stats["merged"] = merged_info
+        stats["seconds"] = round(time.time() - t0, 2)
+        with open(os.path.join(outdir, "stats.json"), "w", encoding="utf-8") as f:
+            json.dump(stats, f, ensure_ascii=False, indent=2)
+        return outdir, stats
     else:
         small, W, H = prepare_image(img, width)
     lab = srgb_to_lab(np.asarray(small, dtype=np.float64).reshape(-1, 3))
@@ -749,8 +811,8 @@ def main():
     ap.add_argument("--metric", choices=["ciede2000", "lab"], default="ciede2000")
     ap.add_argument("--series", help="限定色卡系列, 如 'A-HM' 或 'ABCM'; 默认全部 291 色")
     ap.add_argument("--colors", type=int, default=32, help="limited 模式聚类色数 (默认 32)")
-    ap.add_argument("--algo", choices=["plain", "mode", "edge"], default="plain",
-                    help="降采样: plain=LANCZOS mode=区域主流色 edge=内容自适应加权")
+    ap.add_argument("--algo", choices=["plain", "mode", "edge", "mode4"], default="plain",
+                    help="降采样: plain=LANCZOS mode=区域主流色 edge=内容自适应 mode4=4x超采样多数投票")
     ap.add_argument("--despeckle", type=int, default=0,
                     help="孤立豆清理: 连通域小于 N 的色块并入周围 (0=关)")
     ap.add_argument("--merge", type=float, default=0,

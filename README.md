@@ -55,6 +55,7 @@ pindou-generator/
 | `--algo plain` | LANCZOS 降采样 + CIEDE2000 逐点匹配 |
 | `--algo mode` | 区域主流色采样: 色块锐利, 抑制噪点 |
 | `--algo edge` | 内容自适应加权降采样 (边缘感知, 保形状) |
+| `--algo mode4` | **4x 超采样多数投票** (借鉴 BeadCraft/PixArt-Beads 管线): LANCZOS 到 4 倍网格 → 量化 → 4×4 块多数投票, 混杂区退回平均色精确匹配。保真度 ≈ plain, 但色块更干净、色数更少 (省材料), 推荐 |
 | `--mode dither` | Lab 空间误差抖动 (只扩散明度, 防色点噪声) |
 | `--merge N` | 相似色合并 (CIEDE2000 < N 的近似色并入主流色) |
 | `--despeckle N` | 孤立豆清理 (连通域 < N 的色块并入周围) |

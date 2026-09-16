@@ -146,7 +146,7 @@ async def api_generate(
         raise HTTPException(400, f"未知色差算法: {metric}")
     if not (2 <= n_colors <= 64):
         raise HTTPException(400, "限色数需在 2–64 之间")
-    if algo not in ("plain", "mode", "edge"):
+    if algo not in ("plain", "mode", "edge", "mode4"):
         raise HTTPException(400, f"未知降采样算法: {algo}")
     if not (0 <= despeckle_n <= 8):
         raise HTTPException(400, "孤立豆清理需在 0–8 之间")
