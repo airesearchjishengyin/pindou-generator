@@ -1,4 +1,4 @@
-# 🧩 拼豆图纸生成器 (Pindou Pattern Generator)
+# 🧩 图豆 (Pindou Pattern Generator)
 
 任意图片 → MARD 色卡拼豆图纸。支持逐点取色 / 误差抖动 / 限制颜色，输出矢量 SVG（无限放大）+ 施工图纸 + 用豆清单 + 熨烫预览，提供 Web 界面和 CLI 两种用法。
 

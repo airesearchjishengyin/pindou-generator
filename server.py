@@ -19,7 +19,7 @@ OUT = os.path.join(HERE, "output")
 os.makedirs(OUT, exist_ok=True)
 os.makedirs(os.path.join(HERE, "static"), exist_ok=True)
 
-app = FastAPI(title="拼豆图纸生成器")
+app = FastAPI(title="图豆 · 拼豆图纸生成器")
 
 _palette = load_palette(None)
 PALETTE = [{"code": c, "rgb": [int(v) for v in rgb]} for c, rgb in _palette]
