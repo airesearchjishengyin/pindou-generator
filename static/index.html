@@ -59,6 +59,12 @@
         <span class="tip">CIEDE2000 阈值，0=关</span>
         <input type="number" id="mergeTh" value="0" min="0" max="20" step="0.5">
       </label>
+      <label>AI 背景移除
+        <select id="bgRemove">
+          <option value="0">关</option>
+          <option value="1">开 — 主体抠图，背景统一（推荐）</option>
+        </select>
+      </label>
       <label id="colorsLabel" class="hidden">限色数量
         <input type="number" id="colors" value="24" min="2" max="64">
       </label>

@@ -137,6 +137,7 @@ async def api_generate(
     algo: str = Form("plain"),
     despeckle_n: int = Form(0),
     merge_th: float = Form(0),
+    bg_remove: int = Form(0),
 ):
     if width < 8 or width > 220:
         raise HTTPException(400, "宽度需在 8–220 之间")
@@ -170,7 +171,8 @@ async def api_generate(
         outdir, stats = generate(img, width=width, mode=mode, metric=metric,
                                  series=series or None, n_colors=n_colors,
                                  src_name=src_name, algo=algo,
-                                 despeckle_n=despeckle_n, merge_th=merge_th)
+                                 despeckle_n=despeckle_n, merge_th=merge_th,
+                                 bg_remove=bool(bg_remove))
     except Exception as e:
         raise HTTPException(500, f"生成失败: {e}")
 

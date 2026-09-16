@@ -711,6 +711,7 @@ def write_outputs(idx_map, codes, pal_rgb, counts, src, params, outdir):
             "n_colors": params.get("colors", 0),
             "despeckle_n": params.get("despeckle_n", 0),
             "merge_th": params.get("merge_th", 0),
+            "bg_remove": bool(params.get("bg_remove", False)),
             "colors_used": len(counts), "beads_total": total,
             "palette_size": len(codes), "legend": legend, "grid": grid_json}
     with open(os.path.join(outdir, "pattern.json"), "w", encoding="utf-8") as f:
@@ -718,19 +719,47 @@ def write_outputs(idx_map, codes, pal_rgb, counts, src, params, outdir):
     stats = {k: v for k, v in data.items() if k != "grid"}
     return stats
 
+def remove_background(img, model="isnet-general-use", bg_color=(255, 255, 255)):
+    """AI 背景移除 (rembg): 把前景主体抠出, 背景填充纯色 (默认白)。
+    model: isnet-general-use (轻量~180MB, 推荐) / birefnet-general (SOTA~1GB)
+    对拼豆场景: 边缘质量直接影响拼豆轮廓, 抠图后背景变纯色 →
+    量化时背景区域统一, 主体轮廓清晰。"""
+    try:
+        from rembg import remove, new_session
+        import io as _io
+        buf = _io.BytesIO()
+        img.convert("RGB").save(buf, format="PNG")
+        buf.seek(0)
+        session = new_session(model)          # 首次运行会下载模型
+        out = remove(buf.read(), session=session)
+        from PIL import Image as _Img
+        out = _Img.open(_io.BytesIO(out)).convert("RGBA")
+        # 背景填充纯色 (保留前景 alpha)
+        bg = _Img.new("RGBA", out.size, (*bg_color, 255))
+        out = _Img.alpha_composite(bg, out).convert("RGB")
+        return out
+    except Exception as e:
+        raise RuntimeError(f"背景移除失败 (rembg 未安装或模型下载失败): {e}")
+
 def generate(img, width=80, mode="plain", metric="ciede2000", series=None,
              n_colors=32, src_name="upload", algo="plain",
-             despeckle_n=0, merge_th=0):
+             despeckle_n=0, merge_th=0, bg_remove=False, bg_model="isnet-general-use"):
     """核心引擎: PIL Image → 图纸文件集。返回 (outdir, stats_dict)。
     CLI 与 Web 共用; img 为 PIL.Image 对象。
     algo: plain=LANCZOS逐点 mode=区域主流色 edge=内容自适应加权
     despeckle_n: 孤立豆清理 (0=关, ≥2=小于该连通域的色块并入周围)
-    merge_th: 相似色合并阈值 CIEDE2000 (0=关, 建议 3~8)"""
+    merge_th: 相似色合并阈值 CIEDE2000 (0=关, 建议 3~8)
+    bg_remove: 是否先 AI 抠图 (主体轮廓更清晰, 背景统一)
+    bg_model: isnet-general-use / birefnet-general"""
     t0 = time.time()
     palette = load_palette(parse_series(series))
     codes = [p[0] for p in palette]
     pal_rgb = np.stack([p[1] for p in palette])
     match, pal_lab, _ = build_matcher(palette, metric)
+
+    # --- 背景移除 (先于降采样) ---
+    if bg_remove:
+        img = remove_background(img, bg_model)
 
     # --- 降采样 ---
     if algo == "mode":
@@ -759,7 +788,8 @@ def generate(img, width=80, mode="plain", metric="ciede2000", series=None,
         outdir = os.path.join(HERE, "output", f"{stem}_{W}_{mode}mode4")
         params = {"image": src_name, "width": width, "mode": mode, "metric": metric,
                   "series": series, "colors": n_colors, "algo": algo,
-                  "despeckle_n": despeckle_n, "merge_th": merge_th}
+                  "despeckle_n": despeckle_n, "merge_th": merge_th,
+                  "bg_remove": bg_remove, "bg_model": bg_model}
         stats = write_outputs(idx_map, codes, pal_rgb, counts, src_name, params, outdir)
         stats["merged"] = merged_info
         stats["seconds"] = round(time.time() - t0, 2)
@@ -793,7 +823,8 @@ def generate(img, width=80, mode="plain", metric="ciede2000", series=None,
     outdir = os.path.join(HERE, "output", f"{stem}_{W}_{mode}{suffix}")
     params = {"image": src_name, "width": width, "mode": mode, "metric": metric,
               "series": series, "colors": n_colors, "algo": algo,
-              "despeckle_n": despeckle_n, "merge_th": merge_th}
+              "despeckle_n": despeckle_n, "merge_th": merge_th,
+              "bg_remove": bg_remove, "bg_model": bg_model}
     stats = write_outputs(idx_map, codes, pal_rgb, counts, src_name, params, outdir)
     stats["merged"] = merged_info
     stats["seconds"] = round(time.time() - t0, 2)
@@ -817,6 +848,11 @@ def main():
                     help="孤立豆清理: 连通域小于 N 的色块并入周围 (0=关)")
     ap.add_argument("--merge", type=float, default=0,
                     help="相似色合并阈值 CIEDE2000 (0=关, 建议 3~8)")
+    ap.add_argument("--bg-remove", action="store_true",
+                    help="AI 背景移除 (rembg, 首次运行下载模型)")
+    ap.add_argument("--bg-model", choices=["isnet-general-use", "birefnet-general"],
+                    default="isnet-general-use",
+                    help="抠图模型: isnet-general-use(轻量) / birefnet-general(SOTA)")
     ap.add_argument("-o", "--outdir", default=None)
     args = ap.parse_args()
 
@@ -825,7 +861,8 @@ def main():
                              series=args.series, n_colors=args.colors,
                              src_name=os.path.basename(args.image),
                              algo=args.algo, despeckle_n=args.despeckle,
-                             merge_th=args.merge)
+                             merge_th=args.merge, bg_remove=args.bg_remove,
+                             bg_model=args.bg_model)
     if args.outdir:   # 兼容旧参数: 把输出目录整体搬过去
         import shutil
         if os.path.abspath(args.outdir) != os.path.abspath(outdir):

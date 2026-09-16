@@ -58,6 +58,7 @@ $("#btnGo").addEventListener("click", async () => {
   fd.append("algo", $("#algo").value);
   fd.append("despeckle_n", $("#despeckle").value);
   fd.append("merge_th", $("#mergeTh").value);
+  fd.append("bg_remove", $("#bgRemove").value);
 
   try {
     const r = await fetch("/api/generate", { method: "POST", body: fd });
@@ -93,6 +94,7 @@ function renderResult() {
     <span class="chip">${s.colors_used} 色</span>
     <span class="chip gray">${modeName(s.mode)}${s.mode === "limited" ? " " + s.n_colors + " 色" : ""} · ${s.seconds}s</span>
     <span class="chip gray">${algoName(s.algo || "plain")}</span>
+    ${s.bg_remove ? `<span class="chip gray">AI 抠图</span>` : ""}
     ${s.merged && s.merged.length ? `<span class="chip gray">合并 ${s.merged.length} 对近似色</span>` : ""}
     <span class="chip gray">${s.metric === "ciede2000" ? "CIEDE2000" : "Lab"} · ${s.series}</span>`;
   renderBeads();
