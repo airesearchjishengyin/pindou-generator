@@ -139,8 +139,8 @@ async def api_generate(
     merge_th: float = Form(0),
     bg_remove: int = Form(0),
 ):
-    if width < 8 or width > 220:
-        raise HTTPException(400, "宽度需在 8–220 之间")
+    if width < 8 or width > 400:
+        raise HTTPException(400, "宽度需在 8–400 之间 (400 宽为超大图, 生成与渲染需要一些时间)")
     if mode not in ("plain", "dither", "limited"):
         raise HTTPException(400, f"未知模式: {mode}")
     if metric not in ("ciede2000", "lab"):

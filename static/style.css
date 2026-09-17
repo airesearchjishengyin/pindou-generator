@@ -166,6 +166,9 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   border: 1px solid var(--border); border-radius: 10px;
 }
 .canvas-wrap canvas { display: block; }
+/* 超大图纸视口渲染: canvas 钉在可视区, spacer 撑出滚动 */
+#gridCanvas.vp { position: sticky; top: 0; left: 0; }
+#gridSpacer { flex: none; }
 
 /* 按色施工 / 精修 双栏 */
 .bycolor-layout { display: grid; grid-template-columns: 230px 1fr; gap: 16px; }

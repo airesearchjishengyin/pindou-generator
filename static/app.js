@@ -104,11 +104,12 @@ function renderResult() {
   loadIronTree();
   loadSvg("#svgOverview", "pattern_overview.svg");
   loadSvg("#svgPreview", "pattern.svg");
-  drawGrid();
-  drawByColor();
-  drawEdit();
-  $("#resultPanel").classList.remove("hidden");
+  $("#resultPanel").classList.remove("hidden");   // 先显示再量尺寸 (视口渲染需要真实 wrap 尺寸)
   $("#resultPanel").scrollIntoView({ behavior: "smooth" });
+  drawGrid(); drawByColor(); drawEdit();          // 立即画 (后台标签 rAF 冻结也有内容)
+  const redraw = () => { drawGrid(); drawByColor(); drawEdit(); };
+  requestAnimationFrame(redraw);                  // 布局完成后校正尺寸 (wrap 才有真实高度)
+  setTimeout(redraw, 350);                        // 兜底: 后台标签 rAF 冻结时仍会执行
 }
 
 function modeName(m) {
@@ -130,6 +131,11 @@ async function loadSvg(sel, fname) {
 /* ================= 施工图纸 (canvas, 放大始终清晰) ================= */
 const gridCanvas = $("#gridCanvas"), gridWrap = $("#gridWrap");
 
+/* 超大图纸视口渲染: 内容超过浏览器 canvas 上限 (8192px 边 / 16M 像素) 时,
+   只把可视窗口画到固定大小的 canvas 上, 用 spacer 撑出原生滚动条 */
+const MAX_CANVAS_SIDE = 8192, MAX_CANVAS_AREA = 16e6;
+let gridSpacer = null;
+
 function drawGrid() {
   if (!state.pattern) return;
   const { grid, legend } = state.pattern;
@@ -138,19 +144,45 @@ function drawGrid() {
   const scale = state.gz;                       // 1 格 = 40*scale px
   const cell = 40 * scale;
   const margin = Math.max(28, cell * 0.8);
-  gridCanvas.width = Math.round(w * cell + margin * 2);
-  gridCanvas.height = Math.round(h * cell + margin * 2);
+  const VW = Math.round(w * cell + margin * 2), VH = Math.round(h * cell + margin * 2);
+  // 视口模式判定: 整图一块 canvas 会超浏览器上限 → 只画可视区
+  const vw = Math.max(200, gridWrap.clientWidth), vh = Math.max(200, gridWrap.clientHeight);
+  const vp = VW > MAX_CANVAS_SIDE || VH > MAX_CANVAS_SIDE || VW * VH > MAX_CANVAS_AREA;
+  let offX, offY, x0, x1, y0, y1, sx = 0, sy = 0;
+  if (vp) {
+    if (!gridSpacer) {
+      gridSpacer = document.createElement("div");
+      gridSpacer.id = "gridSpacer";
+      gridWrap.appendChild(gridSpacer);
+    }
+    gridSpacer.style.width = Math.max(0, VW - vw) + "px";
+    gridSpacer.style.height = Math.max(0, VH - vh) + "px";
+    gridCanvas.classList.add("vp");
+    sx = gridWrap.scrollLeft; sy = gridWrap.scrollTop;   // 尺寸变更后浏览器已钳到合法值
+    gridCanvas.width = vw; gridCanvas.height = vh;
+    offX = margin - sx; offY = margin - sy;
+    x0 = Math.max(0, Math.floor((sx - margin) / cell));
+    x1 = Math.min(w, Math.ceil((sx + vw - margin) / cell) + 1);
+    y0 = Math.max(0, Math.floor((sy - margin) / cell));
+    y1 = Math.min(h, Math.ceil((sy + vh - margin) / cell) + 1);
+  } else {
+    if (gridSpacer) { gridSpacer.style.width = "0px"; gridSpacer.style.height = "0px"; }
+    gridCanvas.classList.remove("vp");
+    gridCanvas.width = VW; gridCanvas.height = VH;
+    offX = offY = margin;
+    x0 = 0; x1 = w; y0 = 0; y1 = h;
+  }
   const ctx = gridCanvas.getContext("2d");
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, gridCanvas.width, gridCanvas.height);
   ctx.imageSmoothingEnabled = false;
 
-  // 色块
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
+  // 色块 (只画可视窗口)
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
       const [r, g, b] = rgbOf[grid[y][x]];
       ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(Math.round(margin + x * cell), Math.round(margin + y * cell),
+      ctx.fillRect(Math.round(offX + x * cell), Math.round(offY + y * cell),
                    Math.ceil(cell), Math.ceil(cell));
     }
   }
@@ -158,13 +190,13 @@ function drawGrid() {
   ctx.strokeStyle = "rgba(0,0,0,0.18)";
   ctx.lineWidth = Math.max(0.5, scale * 0.5);
   ctx.beginPath();
-  for (let x = 0; x <= w; x++) {
-    ctx.moveTo(margin + x * cell, margin);
-    ctx.lineTo(margin + x * cell, margin + h * cell);
+  for (let x = x0; x <= x1; x++) {
+    ctx.moveTo(offX + x * cell, offY + y0 * cell);
+    ctx.lineTo(offX + x * cell, offY + y1 * cell);
   }
-  for (let y = 0; y <= h; y++) {
-    ctx.moveTo(margin, margin + y * cell);
-    ctx.lineTo(margin + w * cell, margin + y * cell);
+  for (let y = y0; y <= y1; y++) {
+    ctx.moveTo(offX + x0 * cell, offY + y * cell);
+    ctx.lineTo(offX + x1 * cell, offY + y * cell);
   }
   ctx.stroke();
 
@@ -174,12 +206,12 @@ function drawGrid() {
     ctx.lineWidth = Math.max(1.2, scale * 1.6);
     ctx.beginPath();
     for (let x = 0; x <= w; x += 29) {
-      ctx.moveTo(margin + x * cell, margin);
-      ctx.lineTo(margin + x * cell, margin + h * cell);
+      ctx.moveTo(offX + x * cell, offY + y0 * cell);
+      ctx.lineTo(offX + x * cell, offY + y1 * cell);
     }
     for (let y = 0; y <= h; y += 29) {
-      ctx.moveTo(margin, margin + y * cell);
-      ctx.lineTo(margin + w * cell, margin + y * cell);
+      ctx.moveTo(offX + x0 * cell, offY + y * cell);
+      ctx.lineTo(offX + x1 * cell, offY + y * cell);
     }
     ctx.stroke();
     ctx.strokeStyle = "#c0392b";
@@ -187,29 +219,29 @@ function drawGrid() {
     ctx.beginPath();
     for (let x = 5; x < w; x += 5) {
       if (x % 29 === 0) continue;
-      ctx.moveTo(margin + x * cell, margin);
-      ctx.lineTo(margin + x * cell, margin + h * cell);
+      ctx.moveTo(offX + x * cell, offY + y0 * cell);
+      ctx.lineTo(offX + x * cell, offY + y1 * cell);
     }
     for (let y = 5; y < h; y += 5) {
       if (y % 29 === 0) continue;
-      ctx.moveTo(margin, margin + y * cell);
-      ctx.lineTo(margin + w * cell, margin + y * cell);
+      ctx.moveTo(offX + x0 * cell, offY + y * cell);
+      ctx.lineTo(offX + x1 * cell, offY + y * cell);
     }
     ctx.stroke();
   }
 
-  // 色号文字 (格子足够大才画)
+  // 色号文字 (格子足够大才画; 只画可视窗口)
   if (cell >= 22) {
     const fs = Math.max(9, cell * 0.32);
     ctx.font = `600 ${fs}px Arial`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
         const [r, g, b] = rgbOf[grid[y][x]];
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
         ctx.fillStyle = lum < 140 ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.82)";
-        ctx.fillText(grid[y][x], margin + (x + 0.5) * cell, margin + (y + 0.5) * cell);
+        ctx.fillText(grid[y][x], offX + (x + 0.5) * cell, offY + (y + 0.5) * cell);
       }
     }
   }
@@ -221,14 +253,21 @@ function drawGrid() {
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
     for (let x = 0; x < w; x += 5)
-      ctx.fillText(x + 1, margin + x * cell + 2, margin - 6);
+      ctx.fillText(x + 1, offX + x * cell + 2, offY - 6);
     ctx.textAlign = "right";
     for (let y = 0; y < h; y += 5)
-      ctx.fillText(y + 1, margin - 5, margin + y * cell + fs);
+      ctx.fillText(y + 1, offX - 5, offY + y * cell + fs);
   }
   gridCanvas.dataset.margin = margin;
   gridCanvas.dataset.cell = cell;
+  gridCanvas.dataset.vp = vp ? "1" : "";
 }
+let gridDrawRaf = 0;
+gridWrap.addEventListener("scroll", () => {
+  if (!gridCanvas.classList.contains("vp")) return;
+  if (gridDrawRaf) return;
+  gridDrawRaf = requestAnimationFrame(() => { gridDrawRaf = 0; drawGrid(); });
+});
 
 $("#gzIn").addEventListener("click", () => setZoom(state.gz * 1.3));
 $("#gzOut").addEventListener("click", () => setZoom(state.gz / 1.3));
@@ -236,22 +275,24 @@ $("#gz100").addEventListener("click", () => setZoom(1));
 $("#gzFit").addEventListener("click", () => {
   if (!state.pattern) return;
   const w = state.pattern.grid[0].length;
-  setZoom(Math.max(0.1, (gridWrap.clientWidth - 30) / (w * 40)));
+  setZoom(Math.max(0.02, (gridWrap.clientWidth - 30) / (w * 40)));
 });
 function setZoom(z) {
-  state.gz = Math.min(8, Math.max(0.15, z));
+  state.gz = Math.min(8, Math.max(0.05, z));   // 视口渲染下低倍率安全, 适应窗口对超大图才真实
   $("#gzVal").textContent = Math.round(state.gz * 100) + "%";
   drawGrid();
 }
 $("#showBoards").addEventListener("change", drawGrid);
 
-// 悬停坐标提示
+// 悬停坐标提示 (视口模式要把滚动量算回去)
 gridCanvas.addEventListener("mousemove", (e) => {
   if (!state.pattern) return;
   const rect = gridCanvas.getBoundingClientRect();
   const margin = +gridCanvas.dataset.margin, cell = +gridCanvas.dataset.cell;
-  const x = Math.floor((e.clientX - rect.left - margin) / cell);
-  const y = Math.floor((e.clientY - rect.top - margin) / cell);
+  const sx = gridCanvas.dataset.vp ? gridWrap.scrollLeft : 0;
+  const sy = gridCanvas.dataset.vp ? gridWrap.scrollTop : 0;
+  const x = Math.floor((e.clientX - rect.left + sx - margin) / cell);
+  const y = Math.floor((e.clientY - rect.top + sy - margin) / cell);
   const { grid } = state.pattern;
   if (x >= 0 && y >= 0 && y < grid.length && x < grid[0].length)
     $("#gridHover").textContent = `(${x + 1}, ${y + 1}) ${grid[y][x]}`;
@@ -404,6 +445,13 @@ function drawByColor() {
 function applyPan() {
   byColorCanvas.style.transform = `translate(${bzState.px}px, ${bzState.py}px)`;
 }
+/* 超大图纸: 画布不能超过浏览器上限 → 缩放上限随图案尺寸收缩 */
+function bzCapZoom() {
+  if (!state.pattern) return 4;
+  const w = state.pattern.grid[0].length, h = state.pattern.grid.length;
+  const lw = w * 40 + 120, lh = h * 40 + 120;
+  return Math.max(0.02, Math.min(4, Math.sqrt(15.5e6 / (lw * lh)), 8192 / Math.max(lw, lh)));
+}
 function bzFit() {
   const { grid } = state.pattern;
   if (!grid) return;
@@ -411,12 +459,13 @@ function bzFit() {
   const w = grid[0].length, h = grid.length;
   const fit = Math.min((wrap.clientWidth - 24) / (w * 40 + 120),
                        (wrap.clientHeight - 24) / (h * 40 + 120));
-  bzState.zoom = Math.max(0.1, fit);
+  const cap = bzCapZoom();
+  bzState.zoom = Math.min(cap, Math.max(Math.min(0.1, cap), fit));
   bzState.px = bzState.py = 0;
   drawByColor();
 }
 function setBz(z) {
-  bzState.zoom = Math.min(4, Math.max(0.1, z));
+  bzState.zoom = Math.min(bzCapZoom(), Math.max(0.1, z));
   drawByColor();
 }
 $("#bzIn").addEventListener("click", () => setBz(bzState.zoom * 1.25));
@@ -552,7 +601,9 @@ function drawEdit() {
   const grid = state.pattern.grid;
   const h = grid.length, w = grid[0].length;
   const rgbOf = Object.fromEntries(state.pattern.legend.map(([c, n, p, r, g, b]) => [c, [r, g, b]]));
-  const scale = Math.min(1.4, Math.max(0.3, (window.innerWidth * 0.55) / (w * 40)));
+  const LW0 = w * 40 + 52, LH0 = h * 40 + 52;
+  const scale = Math.min(1.4, Math.max(0.3, (window.innerWidth * 0.55) / (w * 40)),
+                         Math.sqrt(15.5e6 / (LW0 * LH0)), 8192 / Math.max(LW0, LH0));
   const cell = 40 * scale;
   const margin = 26;
   canvas.width = Math.round(w * cell + margin * 2);

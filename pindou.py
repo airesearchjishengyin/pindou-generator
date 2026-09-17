@@ -134,25 +134,32 @@ def build_matcher(palette, metric, dark_guard=True):
     codes = [p[0] for p in palette]
     pal_c = np.hypot(pal_lab[:, 1], pal_lab[:, 2])      # 候选彩度 C*
 
+    BLK = 8192                            # 行块大小: 中间广播矩阵峰值 ~57MB (超大图防OOM)
+
     if metric == "lab":
         def match(lab_px):                       # lab_px: [N,3]
-            d = np.linalg.norm(lab_px[:, None, :] - pal_lab[None, :, :], axis=2)
-            if dark_guard:
-                d = d + dark_penalty(lab_px, pal_lab, pal_c)
-            return np.argmin(d, axis=1)
+            n = len(lab_px)
+            idx = np.zeros(n, dtype=np.int32)
+            for s in range(0, n, BLK):           # 分块: N×M 距离矩阵不整体物化 (超大图防OOM)
+                e = min(s + BLK, n)
+                d = np.linalg.norm(lab_px[s:e, None, :] - pal_lab[None, :, :], axis=2)
+                if dark_guard:
+                    d = d + dark_penalty(lab_px[s:e], pal_lab, pal_c)
+                idx[s:e] = np.argmin(d, axis=1)
+            return idx
     else:
         def match(lab_px):
-            best = np.full(len(lab_px), np.inf)
-            idx = np.zeros(len(lab_px), dtype=np.int32)
-            if dark_guard:
-                pen = dark_penalty(lab_px, pal_lab, pal_c)   # [N,M] 预计算一次
-            for j in range(len(pal_lab)):        # 逐色广播, N×M 总量不变
-                chunk = np.arange(0, len(lab_px), 4096)
-                for s in chunk:
-                    e = min(s + 4096, len(lab_px))
-                    d = ciede2000(lab_px[s:e], pal_lab[j])
-                    if dark_guard:
-                        d = d + pen[s:e, j]
+            n = len(lab_px)
+            best = np.full(n, np.inf)
+            idx = np.zeros(n, dtype=np.int32)
+            for s in range(0, n, BLK):           # 行块外层: 暗部惩罚矩阵按块预计算
+                e = min(s + BLK, n)
+                blk = lab_px[s:e]
+                pen = dark_penalty(blk, pal_lab, pal_c) if dark_guard else None
+                for j in range(len(pal_lab)):    # 逐色广播
+                    d = ciede2000(blk, pal_lab[j])
+                    if pen is not None:
+                        d = d + pen[:, j]
                     upd = d < best[s:e]
                     best[s:e][upd] = d[upd]
                     idx[s:e][upd] = j
@@ -310,24 +317,34 @@ def mode4_supersample(rgb_img, W, H, pal_lab, pal_c, match, dark_guard=True):
         if dark_guard:
             d = d + dark_penalty(lab4[s:e], pal_lab, pal_c)
         idx4[s:e] = np.argmin(d, axis=1)
-    idx4 = idx4.reshape(H * W, 16)                            # 每块 16 格
-    # 一次 bincount 求所有块的众数
-    flat = idx4 + np.arange(H * W)[:, None] * n_pal
-    counts = np.bincount(flat.ravel(), minlength=H * W * n_pal).reshape(H * W, n_pal)
-    best = counts.argmax(1)
-    p = counts.max(1) / 16.0
-    # 块内平均色精确匹配 (全部块, 向量化)
+    n_cells = H * W
+    # 分块众数投票 + 分块精确匹配: N×291 的计数/距离矩阵不整体物化 (超大图防OOM)
+    VC = 16384                                # 每块格子数 → 计数矩阵 ~38MB
+    best = np.empty(n_cells, dtype=np.int64)
+    p_arr = np.empty(n_cells, dtype=np.float64)
+    for s in range(0, n_cells, VC):
+        e = min(s + VC, n_cells)
+        blk = idx4[s * 16:e * 16].reshape(e - s, 16)
+        flat = blk + np.arange(e - s, dtype=np.int64)[:, None] * n_pal   # 块内行号 0.., 值连续
+        counts = np.bincount(flat.ravel(), minlength=(e - s) * n_pal).reshape(e - s, n_pal)
+        b = counts.argmax(1)
+        best[s:e] = b
+        p_arr[s:e] = counts[np.arange(e - s), b] / 16.0
+    # 块内平均色精确匹配 (分块向量化)
     avg = im4.reshape(H, 4, W, 4, 3).mean(axis=(1, 3)).reshape(-1, 3)   # (H*W,3)
     lab_avg = srgb_to_lab(avg)
-    d = ciede2000(lab_avg[:, None, :], pal_lab[None, :, :])
-    if dark_guard:
-        d = d + dark_penalty(lab_avg, pal_lab, pal_c)
-    avg_best = np.argmin(d, axis=1)
-    # 双条件保留众数: 票数占比高 且 众数色与平均色近邻 (ΔE≤8)
-    # 否则退回平均色精确匹配 — 渐变区(如人脸晕涂)用平均色才准,
-    # 一致区(大面积纯色)用众数保持色块干净锐利
-    mode_ok = (p >= 0.50) & (d[np.arange(H * W), best] <= 8.0)
-    best = np.where(mode_ok, best, avg_best)
+    for s in range(0, n_cells, VC):
+        e = min(s + VC, n_cells)
+        d = ciede2000(lab_avg[s:e, None, :], pal_lab[None, :, :])
+        if dark_guard:
+            d = d + dark_penalty(lab_avg[s:e], pal_lab, pal_c)
+        avg_best = np.argmin(d, axis=1)
+        # 双条件保留众数: 票数占比高 且 众数色与平均色近邻 (ΔE≤8)
+        # 否则退回平均色精确匹配 — 渐变区(如人脸晕涂)用平均色才准,
+        # 一致区(大面积纯色)用众数保持色块干净锐利
+        rows = np.arange(e - s)
+        mode_ok = (p_arr[s:e] >= 0.50) & (d[rows, best[s:e]] <= 8.0)
+        best[s:e] = np.where(mode_ok, best[s:e], avg_best)
     return best.reshape(H, W).astype(np.int32)
 
 # ------------------------------------------------------------ 抖动 ----
@@ -416,7 +433,8 @@ def render_svg(idx_map, codes, pal_rgb, path, counts, src, params, layout="grid"
         lrows_cap = max(6, (ph + 60) // row_h)
         lcols = max(1, math.ceil(len(order) / lrows_cap))
         lw = lcols * lcol_w + 30
-        Wt, Ht = 30 + pw + 26 + lw, max(ph, len(order) * row_h if lcols == 1 else 0) + 90
+        lrows_used = lrows_cap if lcols > 1 else len(order)
+        Wt, Ht = 30 + pw + 26 + lw, max(ph, 104 + lrows_used * row_h + lsw) + 30
         s = ['<?xml version="1.0" encoding="UTF-8"?>',
              f'<svg xmlns="http://www.w3.org/2000/svg" '
              f'xmlns:xlink="http://www.w3.org/1999/xlink" width="{Wt}" height="{Ht}" '
@@ -570,6 +588,8 @@ def render_grid(idx_map, codes, pal_rgb, path):
     """位图施工图纸: 网格/坐标/色号 + 右侧图例面板"""
     h, w = idx_map.shape
     cell = min(max(26, 3000 // max(w, 1)), 60)
+    if w * h * cell * cell > 48_000_000:      # 超大图: 缩格子保内存 (PIL 位图)
+        cell = max(6, int((48_000_000 / (w * h)) ** 0.5))
     font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf",
                               max(9, int(cell * 0.30)))
     margin_l, margin_t = int(cell * 1.2), int(cell * 1.2)
@@ -591,10 +611,11 @@ def render_grid(idx_map, codes, pal_rgb, path):
             d.rectangle([x0, y0, x0 + cell, y0 + cell],
                         fill=tuple(int(v) for v in pal_rgb[j]), outline="#bbbbbb")
             code = codes[j]
-            label = code if len(code) <= 3 else code[:3]
-            tw = d.textlength(label, font=font)
-            d.text((x0 + (cell - tw) / 2, y0 + (cell - font.size) / 2 - 1),
-                   label, fill="black", font=font)
+            if cell >= 14:                    # 格子太小时不印色号 (糊成一团)
+                label = code if len(code) <= 3 else code[:3]
+                tw = d.textlength(label, font=font)
+                d.text((x0 + (cell - tw) / 2, y0 + (cell - font.size) / 2 - 1),
+                       label, fill="black", font=font)
     for xx in range(0, w + 1, 10):
         d.line([margin_l + xx * cell, margin_t, margin_l + xx * cell, im.height], fill="#666666")
     for yy in range(0, h + 1, 10):
