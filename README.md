@@ -1,5 +1,16 @@
 # 🧩 图豆 (Pindou Pattern Generator)
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-perler-beads-dark.png">
+    <img src="assets/logo-perler-beads.png" alt="图豆 logo — 卡皮巴拉拼豆画 (80×80)" width="420">
+  </picture>
+</p>
+
+<p align="center">
+  <sub>项目 logo「拼豆卡皮巴拉」— 由图豆自己生成：80×80 · 6400 颗 · <a href="assets/logo-capybara-original.png">原图</a> · <a href="assets/logo-perler-blocks.png">方块版</a> · <a href="assets/logo-capybara-pattern-grid.png">施工图纸</a></sub>
+</p>
+
 任意图片 → MARD 色卡拼豆图纸。支持逐点取色 / 误差抖动 / 限制颜色，输出矢量 SVG（无限放大）+ 施工图纸 + 用豆清单 + 熨烫预览，提供 Web 界面和 CLI 两种用法。
 
 ## 快速开始
