@@ -103,12 +103,14 @@ async function refreshUserBar() {
     const me = await (await fetch("/api/me")).json();
     if (!me.logged_in) {
       bar.textContent = "";
+      panel.classList.remove("hidden");
       if (me.providers && me.providers.length) {
-        panel.classList.remove("hidden");
         $("#loginBtns").innerHTML = me.providers.map(p => {
           const label = p === "google" ? "使用 Google 登录" : "使用 Microsoft 登录";
           return `<a class="primary" style="display:inline-block;margin:4px;padding:6px 14px;border:1px solid #ccc;border-radius:6px;text-decoration:none" href="/auth/${p}/login">${label}</a>`;
         }).join("");
+      } else {
+        $("#loginHint").classList.remove("hidden");   // 未配 OAuth: 说明现状
       }
       return null;
     }
