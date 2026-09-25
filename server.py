@@ -18,11 +18,12 @@ if os.path.isfile(_ENV_FILE):
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 from pindou import generate, load_palette, write_outputs  # noqa: E402
+import accounts, oauth_login                              # noqa: E402
 
 import numpy as np                                        # noqa: E402
 from collections import Counter                           # noqa: E402
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException  # noqa: E402
-from fastapi.responses import FileResponse, Response      # noqa: E402
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request  # noqa: E402
+from fastapi.responses import FileResponse, Response, RedirectResponse      # noqa: E402
 from fastapi.staticfiles import StaticFiles               # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -180,6 +181,93 @@ async def api_license_gen(admin_key: str = Form(...), count: int = Form(1),
 TRIAL_MARKER = "__trials"          # licenses.json 里记录已领尝鲜码的标识
 TRIAL_MAX_PER_DAY = 30             # 尝鲜码每日总发放上限 (防滥用烧 API 钱)
 
+# ================= 账户系统: 登录 + 余额 =================
+accounts.init_db()
+_OAUTH_STATES = set()              # 防 CSRF 的 state (内存态, 重启失效可接受)
+
+
+def _current_user(request: Request):
+    """从签名 Cookie 解出登录邮箱, 未登录返回 None"""
+    return accounts.verify_session(request.cookies.get("pd_session", ""))
+
+
+@app.get("/auth/providers")
+def auth_providers():
+    """前端据此渲染登录按钮 (未配置的提供商不显示)"""
+    return {"providers": oauth_login.configured()}
+
+
+@app.get("/auth/{provider}/login")
+def auth_login(provider: str, request: Request):
+    if provider not in oauth_login.configured():
+        raise HTTPException(404, f"登录方式 {provider} 未配置")
+    state = oauth_login.make_state()
+    _OAUTH_STATES.add(state)
+    # 回调 base: 优先显式配置 (公网域名), 否则从 Host 头推断
+    base = os.environ.get("PINDOU_BASE_URL", "").rstrip("/") or \
+        f"{request.url.scheme}://{request.headers.get('host', '127.0.0.1:8600')}"
+    return RedirectResponse(oauth_login.auth_redirect(provider, base, state))
+
+
+@app.get("/auth/{provider}/callback")
+def auth_callback(provider: str, request: Request, code: str = "", state: str = ""):
+    if provider not in oauth_login.PROVIDERS:
+        raise HTTPException(404, "未知提供商")
+    if state not in _OAUTH_STATES:
+        raise HTTPException(400, "state 校验失败, 请重新登录")
+    _OAUTH_STATES.discard(state)
+    if not code:
+        raise HTTPException(400, "授权取消")
+    base = os.environ.get("PINDOU_BASE_URL", "").rstrip("/") or \
+        f"{request.url.scheme}://{request.headers.get('host', '127.0.0.1:8600')}"
+    info = oauth_login.exchange_code(provider, base, code)
+    user = accounts.upsert_user(info["email"], provider, info.get("name", ""))
+    resp = RedirectResponse("/", status_code=303)
+    resp.set_cookie("pd_session", accounts.sign_session(user["email"]),
+                    max_age=30 * 86400, httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/auth/logout")
+def auth_logout():
+    resp = Response('{"ok": true}')
+    resp.delete_cookie("pd_session")
+    return resp
+
+
+@app.get("/api/me")
+def api_me(request: Request):
+    email = _current_user(request)
+    if not email:
+        return {"logged_in": False, "providers": oauth_login.configured()}
+    bal = accounts.get_balance(email)
+    return {"logged_in": True, "email": email, "balance_yuan": bal / 1000,
+            "price_gen_yuan": accounts.PRICE_PER_GEN_MILLI / 1000,
+            "can_generate": bal >= accounts.PRICE_PER_GEN_MILLI}
+
+
+@app.get("/api/me/ledger")
+def api_me_ledger(request: Request):
+    email = _current_user(request)
+    if not email:
+        raise HTTPException(401, "请先登录")
+    return accounts.ledger_of(email)
+
+
+@app.post("/api/admin/recharge")
+async def api_admin_recharge(request: Request, email: str = Form(...),
+                             amount_yuan: int = Form(...), ref: str = Form("")):
+    """管理员确认收款后入账 (含自动赠送)。同 /api/license/gen 的鉴权方式。"""
+    expected = os.environ.get("PINDOU_ADMIN_KEY", "")
+    got = request.headers.get("x-admin-key", "")
+    if not expected or got != expected:
+        raise HTTPException(403, "无权限")
+    try:
+        return accounts.recharge(email, amount_yuan, ref)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/license/trial")
 async def api_license_trial(client_id: str = Form("")):
     """首次尝鲜: 每个客户端 ID (前端首次访问生成并存 localStorage) 只能领 1 次。
@@ -248,6 +336,7 @@ def iron_methods():
 
 @app.post("/api/generate")
 async def api_generate(
+    request: Request,
     image: UploadFile = File(...),
     width: int = Form(80),
     mode: str = Form("plain"),
@@ -295,9 +384,16 @@ async def api_generate(
     safe_stem = "".join(ch for ch in os.path.splitext(image.filename or "upload")[0]
                         if ch.isalnum() or ch in "-_")[:40] or "upload"
     src_name = f"{safe_stem}_{uuid.uuid4().hex[:6]}{os.path.splitext(image.filename or '')[1]}"
-    # 付费功能强制校验: AI 像素化必须带有效兑换码 (服务端扣次, 不信任前端)
+    # 计费: 登录用户扣余额 (充值账户); 未登录走兑换码 (老路径)
     if ai_pixel:
-        _consume_license(license_code)
+        user_email = _current_user(request)
+        if user_email:
+            try:
+                billing = accounts.consume(user_email, reason="gen", ref=src_name)
+            except ValueError as e:
+                raise HTTPException(402, str(e))
+        else:
+            _consume_license(license_code)
     try:
         outdir, stats = generate(img, width=width, mode=mode, metric=metric,
                                  series=series or None, n_colors=n_colors,

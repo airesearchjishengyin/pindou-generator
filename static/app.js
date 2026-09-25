@@ -95,6 +95,36 @@ async function loadPattern() {
   state.editBase = state.pattern.grid.map(r => [...r]);
 }
 
+/* ================= 登录与余额 ================= */
+async function refreshUserBar() {
+  const bar = $("#userBar");
+  const panel = $("#loginPanel");
+  try {
+    const me = await (await fetch("/api/me")).json();
+    if (!me.logged_in) {
+      bar.textContent = "";
+      if (me.providers && me.providers.length) {
+        panel.classList.remove("hidden");
+        $("#loginBtns").innerHTML = me.providers.map(p => {
+          const label = p === "google" ? "使用 Google 登录" : "使用 Microsoft 登录";
+          return `<a class="primary" style="display:inline-block;margin:4px;padding:6px 14px;border:1px solid #ccc;border-radius:6px;text-decoration:none" href="/auth/${p}/login">${label}</a>`;
+        }).join("");
+      }
+      return null;
+    }
+    panel.classList.add("hidden");
+    bar.innerHTML = `👤 ${me.email} · 余额 ¥${me.balance_yuan.toFixed(2)}` +
+      ` <a href="#" id="btnLogout" style="margin-left:6px">退出</a>`;
+    $("#btnLogout").addEventListener("click", async (e) => {
+      e.preventDefault();
+      await fetch("/auth/logout", { method: "POST" });
+      refreshUserBar();
+    });
+    return me;
+  } catch (e) { return null; }
+}
+refreshUserBar();
+
 /* ================= 兑换码 ================= */
 $("#btnRedeem").addEventListener("click", async () => {
   const code = $("#redeemCode").value.trim();
