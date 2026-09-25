@@ -96,13 +96,20 @@
 
   <section id="paywall" class="panel hidden">
     <h3>AI 像素化 · 付费功能</h3>
-    <p>AI 像素化需要消耗 AI 绘图接口, 按次收费。</p>
+    <p><b>首次尝鲜免费!</b> 之后每次生成 ¥<span id="pwPrice">0.9</span>。</p>
+    <p id="pwTrialBox" style="background:#eef7ee;border:1px solid #bfe3bf;border-radius:6px;padding:8px 10px">
+      🎁 还没用过? 直接点下面按钮领体验码, 免费用 1 次:
+      <button id="btnTrial" class="primary" style="margin-left:6px">领尝鲜码</button>
+      <span id="trialMsg" class="muted"></span>
+    </p>
+    <p>已付款? 输入兑换码:</p>
+    <div style="margin:8px 0">
+      <img id="pwQr" src="pay-qr.png" alt="收款码" width="160"
+           onerror="this.style.display='none'">
+    </div>
     <ol>
-      <li>扫码支付 <b>¥<span id="pwPrice">5</span>.00</b> (每次生成):<br>
-        <img id="pwQr" src="/static/pay-qr.png" alt="收款码" width="180"
-             onerror="this.style.display='none'"><br>
-        <span class="muted">付款备注请留微信/邮箱, 方便售后</span></li>
-      <li>付款后把收到的<b>兑换码</b>填到这里:
+      <li>扫码支付 <b>¥<span id="pwPrice2">0.9</span></b> (备注留微信/邮箱方便售后)</li>
+      <li>把收到的<b>兑换码</b>填到这里:
         <div style="margin:8px 0">
           <input type="text" id="redeemCode" placeholder="如 PD-1A2B3C4D" size="16"
                  style="text-transform:uppercase">

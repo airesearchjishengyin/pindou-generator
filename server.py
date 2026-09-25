@@ -177,6 +177,34 @@ async def api_license_gen(admin_key: str = Form(...), count: int = Form(1),
     return {"ok": True, "codes": made}
 
 
+TRIAL_MARKER = "__trials"          # licenses.json 里记录已领尝鲜码的标识
+TRIAL_MAX_PER_DAY = 30             # 尝鲜码每日总发放上限 (防滥用烧 API 钱)
+
+@app.post("/api/license/trial")
+async def api_license_trial(client_id: str = Form("")):
+    """首次尝鲜: 每个客户端 ID (前端首次访问生成并存 localStorage) 只能领 1 次。
+    client_id 只是防重复的最简手段 — 换浏览器/清缓存可再领, MVP 阶段接受此损耗。"""
+    import secrets
+    cid = client_id.strip()[:64]
+    if not cid:
+        raise HTTPException(400, "缺少客户端标识")
+    data = _load_licenses()
+    trials = data.setdefault(TRIAL_MARKER, {})
+    if cid in trials:
+        raise HTTPException(429, "尝鲜码已领过, 请付费购买 (¥0.9/次)")
+    # 每日发放上限保护
+    today = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+    issued_today = sum(1 for v in trials.values() if str(v.get("date", "")).startswith(today))
+    if issued_today >= TRIAL_MAX_PER_DAY:
+        raise HTTPException(429, "今日尝鲜名额已发完, 明天再来")
+    code = "PD-" + secrets.token_hex(4).upper()
+    data[code] = {"max_uses": 1, "uses": 0, "note": f"trial:{cid[:24]}",
+                  "created_at": __import__("datetime").datetime.now().isoformat(timespec="seconds")}
+    trials[cid] = {"code": code, "date": today}
+    _save_licenses(data)
+    return {"ok": True, "code": code}
+
+
 def _job_dir(job: str) -> str:
     if not job or "/" in job or ".." in job or "\\" in job:
         raise HTTPException(404, "任务不存在")

@@ -117,6 +117,26 @@ $("#pwClose").addEventListener("click", () => {
   $("#paywall").classList.add("hidden");
   $("#aiPixel").value = "0";   // 回落到免费模式
 });
+/* 首次尝鲜: 一键领体验码并自动填入 */
+$("#btnTrial").addEventListener("click", async () => {
+  const msg = $("#trialMsg");
+  let cid = localStorage.getItem("pindou_cid");
+  if (!cid) {
+    cid = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2);
+    localStorage.setItem("pindou_cid", cid);
+  }
+  msg.textContent = "领取中…";
+  try {
+    const fd = new FormData(); fd.append("client_id", cid);
+    const r = await fetch("/api/license/trial", { method: "POST", body: fd });
+    const data = await r.json();
+    if (!r.ok) { msg.textContent = data.detail || "领取失败"; return; }
+    $("#redeemCode").value = data.code;
+    msg.textContent = "已领到! 点激活即可用";
+  } catch (e) {
+    msg.textContent = "网络错误, 请重试";
+  }
+});
 
 /* ================= 结果渲染 ================= */
 function renderResult() {
