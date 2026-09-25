@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- 背景 -->
+  <rect width="512" height="512" fill="#FDF6EC"/>
+  <!-- 散落拼豆 -->
+  <circle cx="70" cy="120" r="18" fill="#E8503A"/>
+  <circle cx="444" cy="96" r="18" fill="#3A7BD5"/>
+  <circle cx="96" cy="400" r="18" fill="#F4C430"/>
+  <circle cx="430" cy="380" r="18" fill="#2F9E63"/>
+  <circle cx="56" cy="250" r="13" fill="#2F9E63"/>
+  <circle cx="460" cy="230" r="13" fill="#E8503A"/>
+  <circle cx="120" cy="60" r="13" fill="#F4C430"/>
+  <circle cx="400" cy="60" r="13" fill="#8B5E3C"/>
+  <!-- 豆孔 (拼豆特征) -->
+  <circle cx="70" cy="120" r="7" fill="#FDF6EC"/>
+  <circle cx="444" cy="96" r="7" fill="#FDF6EC"/>
+  <circle cx="96" cy="400" r="7" fill="#FDF6EC"/>
+  <circle cx="430" cy="380" r="7" fill="#FDF6EC"/>
+  <circle cx="56" cy="250" r="5" fill="#FDF6EC"/>
+  <circle cx="460" cy="230" r="5" fill="#FDF6EC"/>
+  <circle cx="120" cy="60" r="5" fill="#FDF6EC"/>
+  <circle cx="400" cy="60" r="5" fill="#FDF6EC"/>
+  <!-- 尾巴 -->
+  <ellipse cx="150" cy="330" rx="26" ry="18" fill="#A9754F" transform="rotate(-30 150 330)"/>
+  <!-- 身体 -->
+  <ellipse cx="256" cy="330" rx="130" ry="105" fill="#A9754F"/>
+  <!-- 腹部 -->
+  <ellipse cx="256" cy="360" rx="92" ry="70" fill="#C69A6D"/>
+  <!-- 耳朵 -->
+  <ellipse cx="196" cy="248" rx="26" ry="22" fill="#8B5E3C"/>
+  <ellipse cx="316" cy="248" rx="26" ry="22" fill="#8B5E3C"/>
+  <ellipse cx="196" cy="248" rx="14" ry="11" fill="#D9B08C"/>
+  <ellipse cx="316" cy="248" rx="14" ry="11" fill="#D9B08C"/>
+  <!-- 头 -->
+  <ellipse cx="256" cy="280" rx="112" ry="88" fill="#A9754F"/>
+  <!-- 头顶 (卡皮巴拉特征: 头顶一撮毛) -->
+  <path d="M256 190 Q252 170 244 162 Q256 168 262 158 Q270 172 268 190 Z" fill="#8B5E3C"/>
+  <!-- 眼睛 (睡眼惺忪: 半闭弧线) -->
+  <path d="M206 268 Q220 258 234 268" stroke="#4A2F1B" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M278 268 Q292 258 306 268" stroke="#4A2F1B" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <!-- 鼻子 -->
+  <ellipse cx="256" cy="296" rx="16" ry="11" fill="#4A2F1B"/>
+  <!-- 微笑 -->
+  <path d="M236 316 Q256 332 276 316" stroke="#4A2F1B" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <!-- 脸颊红晕 -->
+  <ellipse cx="196" cy="300" rx="14" ry="9" fill="#E8A08E" opacity="0.7"/>
+  <ellipse cx="316" cy="300" rx="14" ry="9" fill="#E8A08E" opacity="0.7"/>
+  <!-- 右爪 (拿镊子) -->
+  <ellipse cx="362" cy="352" rx="30" ry="26" fill="#A9754F"/>
+  <!-- 镊子 -->
+  <g transform="rotate(35 370 340)">
+    <rect x="352" y="320" width="12" height="70" rx="6" fill="#B0B0B0" transform="rotate(-8 358 355)"/>
+    <rect x="366" y="320" width="12" height="70" rx="6" fill="#9A9A9A" transform="rotate(8 372 355)"/>
+  </g>
+  <!-- 镊子夹住的豆 -->
+  <circle cx="402" cy="300" r="17" fill="#3A7BD5"/>
+  <circle cx="402" cy="300" r="6.5" fill="#FDF6EC"/>
+  <!-- 左爪 -->
+  <ellipse cx="150" cy="360" rx="26" ry="24" fill="#A9754F"/>
+  <!-- 脚 -->
+  <ellipse cx="200" cy="428" rx="30" ry="18" fill="#8B5E3C"/>
+  <ellipse cx="312" cy="428" rx="30" ry="18" fill="#8B5E3C"/>
+</svg>

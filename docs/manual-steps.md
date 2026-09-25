@@ -5,11 +5,11 @@
 ## 第 0 步 · 现在就能做的（0 成本，今天可上线收款）
 
 技术侧已就绪：
-- 公网地址: **https://pindou.macagents.org**（已实测 health/页面正常）
+- 公网地址: **https://tudou.macagents.org**（已实测 health/页面正常）
 - 收费方式: 用户在网页扫码付款 → 你发兑换码 → 用户输码解锁 AI 像素化
 - 发码命令（文档见 `docs/payment-mvp.md`）:
   ```bash
-  curl -X POST https://pindou.macagents.org/api/license/gen \
+  curl -X POST https://tudou.macagents.org/api/license/gen \
     -F admin_key=<你 .env 里的 PINDOU_ADMIN_KEY> -F count=1 -F max_uses=1
   ```
 
@@ -42,7 +42,7 @@
 
 ## 第 2 步 · 域名备案（个体户执照下来后，约 1–2 周）
 
-- 域名建议直接用 **pindou.macagents.org 的主域 macagents.org**（已在 Cloudflare，
+- 域名建议直接用 **tudou.macagents.org 的主域 macagents.org**（已在 Cloudflare，
   但注意：CF 托管 + 国内备案需要把解析切回国内服务商或使用 CF 中国版；也可以另购一个 ~¥50/年的 .com/.cn 专门做这个项目）
 - 备案主体：个体工商户（企业性质备案），通过你买云服务器的厂商提交
   （腾讯云/阿里云都有免费备案辅助服务，需先买一台最便宜的国内服务器 ~¥100/年作为备案跳板）

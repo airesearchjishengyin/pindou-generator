@@ -20,7 +20,7 @@
 用户转账后 (扫码付到你的微信/支付宝), 用管理接口入账:
 
 ```bash
-curl -X POST https://pindou.macagents.org/api/admin/recharge \
+curl -X POST https://tudou.macagents.org/api/admin/recharge \
   -H "x-admin-key: $PINDOU_ADMIN_KEY" \
   -F email=用户邮箱 -F amount_yuan=20 -F ref=微信转账单号
 ```
@@ -31,11 +31,11 @@ curl -X POST https://pindou.macagents.org/api/admin/recharge \
 
 1. Google: console.cloud.google.com → 新建项目 → OAuth 同意屏幕 (External) →
    凭据 → OAuth 客户端 ID (Web) → 授权回调 URI 填
-   `https://pindou.macagents.org/auth/google/callback`
+   `https://tudou.macagents.org/auth/google/callback`
    → 把 Client ID/Secret 填进 `.env`
 2. Microsoft: portal.azure.com → Microsoft Entra ID → 应用注册 → 新建
    → 支持的账户类型选 "任何组织目录中的账户和个人 Microsoft 账户"
-   → 重定向 URI 填 `https://pindou.macagents.org/auth/microsoft/callback`
+   → 重定向 URI 填 `https://tudou.macagents.org/auth/microsoft/callback`
    → 客户端密码 → 填 `.env` (MS_CLIENT_ID / MS_CLIENT_SECRET)
 3. 重启服务: `launchctl kickstart -k gui/$UID/org.pindou.server`
 
