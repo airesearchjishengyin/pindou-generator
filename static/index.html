@@ -65,6 +65,13 @@
           <option value="1">开 — 主体抠图，背景统一（推荐）</option>
         </select>
       </label>
+      <label>AI 像素化
+        <span class="tip">需配置 API，生成约 1–2 分钟</span>
+        <select id="aiPixel">
+          <option value="0">关 — 忠实转换原图</option>
+          <option value="1">开 — AI 先重绘成干净像素画（更干净但不忠实）</option>
+        </select>
+      </label>
       <label id="colorsLabel" class="hidden">限色数量
         <input type="number" id="colors" value="24" min="2" max="64">
       </label>

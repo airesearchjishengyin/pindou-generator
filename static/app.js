@@ -59,6 +59,7 @@ $("#btnGo").addEventListener("click", async () => {
   fd.append("despeckle_n", $("#despeckle").value);
   fd.append("merge_th", $("#mergeTh").value);
   fd.append("bg_remove", $("#bgRemove").value);
+  fd.append("ai_pixel", $("#aiPixel").value);
 
   try {
     const r = await fetch("/api/generate", { method: "POST", body: fd });

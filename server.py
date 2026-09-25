@@ -6,6 +6,17 @@
 import io, os, sys, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# 加载项目根目录 .env (仅内存, 不落盘不入库) — 供 AI 像素化读取 OPENAI_API_KEY/OPENAI_BASE_URL
+_ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.isfile(_ENV_FILE):
+    with open(_ENV_FILE, encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 from pindou import generate, load_palette, write_outputs  # noqa: E402
 
 import numpy as np                                        # noqa: E402
@@ -138,6 +149,9 @@ async def api_generate(
     despeckle_n: int = Form(0),
     merge_th: float = Form(0),
     bg_remove: int = Form(0),
+    ai_pixel: int = Form(0),
+    ai_pixel_grid: int = Form(48),
+    ai_pixel_quality: str = Form("low"),
 ):
     if width < 8 or width > 400:
         raise HTTPException(400, "宽度需在 8–400 之间 (400 宽为超大图, 生成与渲染需要一些时间)")
@@ -153,6 +167,10 @@ async def api_generate(
         raise HTTPException(400, "孤立豆清理需在 0–8 之间")
     if not (0 <= merge_th <= 20):
         raise HTTPException(400, "相似色合并阈值需在 0–20 之间")
+    if ai_pixel_quality not in ("low", "medium", "high"):
+        raise HTTPException(400, f"未知 AI 像素化质量档: {ai_pixel_quality}")
+    if not (8 <= ai_pixel_grid <= 128):
+        raise HTTPException(400, "AI 像素化格数需在 8–128 之间")
 
     raw = await image.read()
     if len(raw) > 30 * 1024 * 1024:
@@ -172,7 +190,13 @@ async def api_generate(
                                  series=series or None, n_colors=n_colors,
                                  src_name=src_name, algo=algo,
                                  despeckle_n=despeckle_n, merge_th=merge_th,
-                                 bg_remove=bool(bg_remove))
+                                 bg_remove=bool(bg_remove),
+                                 ai_pixel=bool(ai_pixel),
+                                 ai_pixel_grid=ai_pixel_grid,
+                                 ai_pixel_quality=ai_pixel_quality)
+    except RuntimeError as e:
+        # AI 像素化未配置 / API 失败: 给用户可操作的提示
+        raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(500, f"生成失败: {e}")
 

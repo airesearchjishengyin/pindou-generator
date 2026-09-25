@@ -733,12 +733,77 @@ def write_outputs(idx_map, codes, pal_rgb, counts, src, params, outdir):
             "despeckle_n": params.get("despeckle_n", 0),
             "merge_th": params.get("merge_th", 0),
             "bg_remove": bool(params.get("bg_remove", False)),
+            "ai_pixel": bool(params.get("ai_pixel", False)),
             "colors_used": len(counts), "beads_total": total,
             "palette_size": len(codes), "legend": legend, "grid": grid_json}
     with open(os.path.join(outdir, "pattern.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
     stats = {k: v for k, v in data.items() if k != "grid"}
     return stats
+
+def _load_dotenv():
+    """加载项目根目录 .env (不覆盖已有环境变量)。供 AI 像素化读取
+    OPENAI_API_KEY / OPENAI_BASE_URL; 键值只进进程环境, 不落盘不入库。"""
+    path = os.path.join(HERE, ".env")
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+
+
+def ai_pixelate(img, grid=48, quality="low", model="gpt-image-2"):
+    """AI 像素化预处理: 调 OpenAI 兼容图生图 API 把照片重绘成干净像素画。
+    凭据只从环境变量 OPENAI_API_KEY / OPENAI_BASE_URL 读取 (可指向任意中转);
+    未配置时抛 RuntimeError, 由调用方提示用户。返回 PIL.Image (RGB)。"""
+    try:
+        import requests, io as _io
+    except ImportError:
+        raise RuntimeError("ai_pixelate 需要 requests 库")
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        _load_dotenv()
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+    if not api_key:
+        raise RuntimeError("AI 像素化未配置: 请在项目根目录 .env (或环境变量) 中设置 "
+                           "OPENAI_API_KEY 和 OPENAI_BASE_URL, 参见 README「AI 像素化配置」")
+    buf = _io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    buf.seek(0)
+    prompt = (f"Convert this photograph into clean pixel art like a classic {grid}x{grid} "
+              f"game sprite: large flat color blocks, sharp pixel edges, a limited palette of "
+              f"about 20 solid colors, no gradients, no dithering, no noise. "
+              f"Keep the subject's pose, colors and background recognizable.")
+    try:
+        resp = requests.post(f"{base_url}/images/edits",
+                             headers={"Authorization": f"Bearer {api_key}"},
+                             files={"image": ("input.png", buf.getvalue(), "image/png")},
+                             data={"model": model, "prompt": prompt,
+                                   "size": "1024x1024", "quality": quality},
+                             timeout=600)
+    except requests.RequestException as e:
+        raise RuntimeError(f"AI 像素化请求失败: {e}")
+    if resp.status_code != 200:
+        detail = ""
+        try:
+            detail = resp.json().get("error", {}).get("message", "")[:200]
+        except Exception:
+            detail = resp.text[:200]
+        raise RuntimeError(f"AI 像素化失败 (HTTP {resp.status_code}): {detail}")
+    import base64
+    d = resp.json()["data"][0]
+    if d.get("b64_json"):
+        raw = base64.b64decode(d["b64_json"])
+    elif d.get("url"):
+        raw = requests.get(d["url"], timeout=300).content
+    else:
+        raise RuntimeError("AI 像素化返回中没有图片数据")
+    from PIL import Image as _Img
+    return _Img.open(_io.BytesIO(raw)).convert("RGB")
+
 
 def remove_background(img, model="isnet-general-use", bg_color=(255, 255, 255)):
     """AI 背景移除 (rembg): 把前景主体抠出, 背景填充纯色 (默认白)。
@@ -764,19 +829,28 @@ def remove_background(img, model="isnet-general-use", bg_color=(255, 255, 255)):
 
 def generate(img, width=80, mode="plain", metric="ciede2000", series=None,
              n_colors=32, src_name="upload", algo="plain",
-             despeckle_n=0, merge_th=0, bg_remove=False, bg_model="isnet-general-use"):
+             despeckle_n=0, merge_th=0, bg_remove=False, bg_model="isnet-general-use",
+             ai_pixel=False, ai_pixel_grid=48, ai_pixel_quality="low"):
     """核心引擎: PIL Image → 图纸文件集。返回 (outdir, stats_dict)。
     CLI 与 Web 共用; img 为 PIL.Image 对象。
     algo: plain=LANCZOS逐点 mode=区域主流色 edge=内容自适应加权
     despeckle_n: 孤立豆清理 (0=关, ≥2=小于该连通域的色块并入周围)
     merge_th: 相似色合并阈值 CIEDE2000 (0=关, 建议 3~8)
     bg_remove: 是否先 AI 抠图 (主体轮廓更清晰, 背景统一)
-    bg_model: isnet-general-use / birefnet-general"""
+    bg_model: isnet-general-use / birefnet-general
+    ai_pixel: AI 像素化预处理 (图生图 API 重绘成干净像素画再转, 更干净但不忠实;
+              需配置 OPENAI_API_KEY / OPENAI_BASE_URL, 见 README)"""
     t0 = time.time()
     palette = load_palette(parse_series(series))
     codes = [p[0] for p in palette]
     pal_rgb = np.stack([p[1] for p in palette])
     match, pal_lab, _ = build_matcher(palette, metric)
+
+    # --- AI 像素化 (最先执行, 其输出作为新的输入图) ---
+    ai_pixel_used = False
+    if ai_pixel:
+        img = ai_pixelate(img, grid=ai_pixel_grid, quality=ai_pixel_quality)
+        ai_pixel_used = True
 
     # --- 背景移除 (先于降采样) ---
     if bg_remove:
@@ -810,7 +884,8 @@ def generate(img, width=80, mode="plain", metric="ciede2000", series=None,
         params = {"image": src_name, "width": width, "mode": mode, "metric": metric,
                   "series": series, "colors": n_colors, "algo": algo,
                   "despeckle_n": despeckle_n, "merge_th": merge_th,
-                  "bg_remove": bg_remove, "bg_model": bg_model}
+                  "bg_remove": bg_remove, "bg_model": bg_model,
+                  "ai_pixel": ai_pixel_used}
         stats = write_outputs(idx_map, codes, pal_rgb, counts, src_name, params, outdir)
         stats["merged"] = merged_info
         stats["seconds"] = round(time.time() - t0, 2)
@@ -845,7 +920,8 @@ def generate(img, width=80, mode="plain", metric="ciede2000", series=None,
     params = {"image": src_name, "width": width, "mode": mode, "metric": metric,
               "series": series, "colors": n_colors, "algo": algo,
               "despeckle_n": despeckle_n, "merge_th": merge_th,
-              "bg_remove": bg_remove, "bg_model": bg_model}
+              "bg_remove": bg_remove, "bg_model": bg_model,
+              "ai_pixel": ai_pixel_used}
     stats = write_outputs(idx_map, codes, pal_rgb, counts, src_name, params, outdir)
     stats["merged"] = merged_info
     stats["seconds"] = round(time.time() - t0, 2)
@@ -874,6 +950,12 @@ def main():
     ap.add_argument("--bg-model", choices=["isnet-general-use", "birefnet-general"],
                     default="isnet-general-use",
                     help="抠图模型: isnet-general-use(轻量) / birefnet-general(SOTA)")
+    ap.add_argument("--ai-pixel", action="store_true",
+                    help="AI 像素化: 先调图生图 API 重绘成干净像素画 (需配置 OPENAI_API_KEY/OPENAI_BASE_URL)")
+    ap.add_argument("--ai-pixel-grid", type=int, default=48,
+                    help="AI 像素化的目标格数 (提示词用, 默认 48)")
+    ap.add_argument("--ai-pixel-quality", choices=["low", "medium", "high"], default="low",
+                    help="AI 像素化的 API 质量档 (默认 low, 最快最便宜)")
     ap.add_argument("-o", "--outdir", default=None)
     args = ap.parse_args()
 
@@ -883,7 +965,9 @@ def main():
                              src_name=os.path.basename(args.image),
                              algo=args.algo, despeckle_n=args.despeckle,
                              merge_th=args.merge, bg_remove=args.bg_remove,
-                             bg_model=args.bg_model)
+                             bg_model=args.bg_model, ai_pixel=args.ai_pixel,
+                             ai_pixel_grid=args.ai_pixel_grid,
+                             ai_pixel_quality=args.ai_pixel_quality)
     if args.outdir:   # 兼容旧参数: 把输出目录整体搬过去
         import shutil
         if os.path.abspath(args.outdir) != os.path.abspath(outdir):

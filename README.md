@@ -25,7 +25,33 @@ python3 pindou.py 照片.jpg -W 96 --mode dither     # 照片用误差抖动
 python3 pindou.py 图.png --mode limited --colors 24  # 限制 24 色内
 ```
 
-依赖: `pillow fastapi uvicorn python-multipart numpy`
+依赖: `pillow fastapi uvicorn python-multipart numpy requests`
+
+## AI 像素化（可选，需自己配置 API）
+
+「AI 像素化」开启后，照片会先由**图生图 AI 重绘成干净的像素画**（大块平涂、无噪点），再走正常的拼豆转换流程。效果：色块干净、杂色少、五官清晰；代价：**这是 AI 的再创作而非忠实转换**，姿势、花纹、背景细节可能被改动。
+
+默认关闭。开启需要配置一个 OpenAI 兼容的图像编辑 API（支持 `POST /v1/images/edits` 的任意服务商或中转均可）：
+
+1. 复制模板并填入你自己的凭据：
+
+   ```bash
+   cp .env.example .env
+   # 编辑 .env, 填入你的 key 和接口地址
+   ```
+
+2. `.env` 两个必填项：
+
+   | 变量 | 说明 |
+   |---|---|
+   | `OPENAI_API_KEY` | 你的 API key（在服务商后台创建） |
+   | `OPENAI_BASE_URL` | 接口地址，官方为 `https://api.openai.com/v1`，中转/自建填对应地址 |
+
+3. `.env` 已被 `.gitignore` 排除，**永远不要提交**；没有 `.env` 时其余功能不受影响，仅 AI 像素化会提示未配置。
+
+CLI 对应参数：`--ai-pixel`（开关）、`--ai-pixel-grid N`（目标格数，默认 48）、`--ai-pixel-quality low|medium|high`（默认 low，最快最省）。
+
+> 该功能会把上传的图片发送给你配置的 API 服务商，介意隐私的图片请勿开启；本机不运行任何图像模型。
 
 ## Web 功能
 
