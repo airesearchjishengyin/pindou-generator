@@ -16,3 +16,4 @@ venv/
 
 # API 凭据 (AI 像素化) — 永不入库
 .env
+licenses.json

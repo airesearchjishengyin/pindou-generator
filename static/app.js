@@ -59,7 +59,16 @@ $("#btnGo").addEventListener("click", async () => {
   fd.append("despeckle_n", $("#despeckle").value);
   fd.append("merge_th", $("#mergeTh").value);
   fd.append("bg_remove", $("#bgRemove").value);
+  // AI 像素化 = 付费功能: 本地无有效码时弹付费面板 (服务端还会再强制校验扣次)
+  const wantAi = $("#aiPixel").value === "1";
+  const savedCode = localStorage.getItem("pindou_code") || "";
+  if (wantAi && !savedCode) {
+    $("#paywall").classList.remove("hidden");
+    btn.disabled = false; $("#loading").classList.add("hidden");
+    return;
+  }
   fd.append("ai_pixel", $("#aiPixel").value);
+  if (wantAi) fd.append("license_code", savedCode);
 
   try {
     const r = await fetch("/api/generate", { method: "POST", body: fd });
@@ -85,6 +94,29 @@ async function loadPattern() {
   state.pattern = await r.json();
   state.editBase = state.pattern.grid.map(r => [...r]);
 }
+
+/* ================= 兑换码 ================= */
+$("#btnRedeem").addEventListener("click", async () => {
+  const code = $("#redeemCode").value.trim();
+  const msg = $("#redeemMsg");
+  if (!code) { msg.textContent = "请输入兑换码"; return; }
+  msg.textContent = "验证中…";
+  try {
+    const fd = new FormData(); fd.append("code", code);
+    const r = await fetch("/api/license/redeem", { method: "POST", body: fd });
+    const data = await r.json();
+    if (!r.ok) { msg.textContent = data.detail || "激活失败"; return; }
+    localStorage.setItem("pindou_code", code);
+    msg.textContent = `验证成功! 该码剩余 ${data.remaining} 次, 每次生成自动扣 1 次`;
+    setTimeout(() => $("#paywall").classList.add("hidden"), 1500);
+  } catch (e) {
+    msg.textContent = "网络错误, 请重试";
+  }
+});
+$("#pwClose").addEventListener("click", () => {
+  $("#paywall").classList.add("hidden");
+  $("#aiPixel").value = "0";   // 回落到免费模式
+});
 
 /* ================= 结果渲染 ================= */
 function renderResult() {

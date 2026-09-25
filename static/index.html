@@ -94,6 +94,25 @@
     </div>
   </section>
 
+  <section id="paywall" class="panel hidden">
+    <h3>AI 像素化 · 付费功能</h3>
+    <p>AI 像素化需要消耗 AI 绘图接口, 按次收费。</p>
+    <ol>
+      <li>扫码支付 <b>¥<span id="pwPrice">5</span>.00</b> (每次生成):<br>
+        <img id="pwQr" src="/static/pay-qr.png" alt="收款码" width="180"
+             onerror="this.style.display='none'"><br>
+        <span class="muted">付款备注请留微信/邮箱, 方便售后</span></li>
+      <li>付款后把收到的<b>兑换码</b>填到这里:
+        <div style="margin:8px 0">
+          <input type="text" id="redeemCode" placeholder="如 PD-1A2B3C4D" size="16"
+                 style="text-transform:uppercase">
+          <button id="btnRedeem" class="primary">激活</button>
+        </div>
+        <span id="redeemMsg" class="muted"></span></li>
+    </ol>
+    <button id="pwClose">先不开通, 用免费模式</button>
+  </section>
+
   <section id="resultPanel" class="panel hidden">
     <div id="statsBar"></div>
     <div class="tabs">

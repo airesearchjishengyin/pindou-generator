@@ -3,7 +3,7 @@
 """拼豆图纸生成器 — Web 服务
 启动: python3 server.py   →  http://localhost:8600
 """
-import io, os, sys, uuid
+import io, os, sys, uuid, json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -95,6 +95,87 @@ FILE_SET = {"pattern.svg", "pattern_overview.svg", "pattern_grid.svg",
             "pattern_grid.png", "pattern.html", "beads.csv", "stats.json",
             "pattern.json"}
 
+# ================= 收费: 兑换码模式 =================
+# 个人主体无法接微信/支付宝商户 API, MVP 用「个人收款码收款 → 发码 → 输码解锁」。
+# 码存 licenses.json (UTF-8); 领域规则见 docs/payment-mvp.md
+LICENSES_PATH = os.path.join(HERE, "licenses.json")
+
+
+def _load_licenses() -> dict:
+    if not os.path.isfile(LICENSES_PATH):
+        return {}
+    with open(LICENSES_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_licenses(data: dict):
+    tmp = LICENSES_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, LICENSES_PATH)
+
+
+@app.post("/api/license/redeem")
+async def api_license_redeem(code: str = Form(...)):
+    """校验兑换码有效性 (不消耗次数; 每次实际生成 AI 图纸时才消耗)。"""
+    code = code.strip().upper()
+    lic = _load_licenses().get(code)
+    if not lic:
+        raise HTTPException(404, "兑换码不存在, 请核对后重试")
+    remaining = max(0, lic.get("max_uses", 1) - lic.get("uses", 0))
+    if remaining <= 0:
+        raise HTTPException(410, "该兑换码次数已用完, 如有疑问请联系卖家")
+    return {"ok": True, "remaining": remaining}
+
+
+def _consume_license(code: str):
+    """AI 生成成功后扣 1 次。码无效/次数用尽抛 HTTPException。"""
+    code = (code or "").strip().upper()
+    data = _load_licenses()
+    lic = data.get(code)
+    if not lic:
+        raise HTTPException(400, "AI 像素化需要有效兑换码 (付费功能)")
+    if lic.get("uses", 0) >= lic.get("max_uses", 1):
+        raise HTTPException(410, "兑换码次数已用完, 请购买新码")
+    lic["uses"] = lic.get("uses", 0) + 1
+    lic["last_used_at"] = __import__("datetime").datetime.now().isoformat(timespec="seconds")
+    _save_licenses(data)
+
+
+@app.get("/api/license/status")
+def api_license_status(code: str):
+    """查询兑换码剩余次数 (供前端展示, 不暴露其他信息)"""
+    code = code.strip().upper()
+    lic = _load_licenses().get(code)
+    if not lic:
+        raise HTTPException(404, "兑换码不存在")
+    remaining = max(0, lic.get("max_uses", 1) - lic.get("uses", 0))
+    return {"valid": remaining > 0, "remaining": remaining,
+            "note": lic.get("note", "")}
+
+
+@app.post("/api/license/gen")
+async def api_license_gen(admin_key: str = Form(...), count: int = Form(1),
+                          max_uses: int = Form(1), note: str = Form("")):
+    """管理端生成兑换码 (admin_key 在 .env 配置, 不入库不入前端)"""
+    expected = os.environ.get("PINDOU_ADMIN_KEY", "")
+    if not expected or admin_key != expected:
+        raise HTTPException(403, "无权限")
+    import secrets
+    if not (1 <= count <= 50):
+        raise HTTPException(400, "count 需在 1–50")
+    if not (1 <= max_uses <= 99):
+        raise HTTPException(400, "max_uses 需在 1–99")
+    data = _load_licenses()
+    made = []
+    for _ in range(count):
+        code = "PD-" + secrets.token_hex(4).upper()   # 16 位十六进制, 大写好念
+        data[code] = {"max_uses": max_uses, "uses": 0, "note": note,
+                      "created_at": __import__("datetime").datetime.now().isoformat(timespec="seconds")}
+        made.append(code)
+    _save_licenses(data)
+    return {"ok": True, "codes": made}
+
 
 def _job_dir(job: str) -> str:
     if not job or "/" in job or ".." in job or "\\" in job:
@@ -152,6 +233,7 @@ async def api_generate(
     ai_pixel: int = Form(0),
     ai_pixel_grid: int = Form(48),
     ai_pixel_quality: str = Form("low"),
+    license_code: str = Form(""),
 ):
     if width < 8 or width > 400:
         raise HTTPException(400, "宽度需在 8–400 之间 (400 宽为超大图, 生成与渲染需要一些时间)")
@@ -185,6 +267,9 @@ async def api_generate(
     safe_stem = "".join(ch for ch in os.path.splitext(image.filename or "upload")[0]
                         if ch.isalnum() or ch in "-_")[:40] or "upload"
     src_name = f"{safe_stem}_{uuid.uuid4().hex[:6]}{os.path.splitext(image.filename or '')[1]}"
+    # 付费功能强制校验: AI 像素化必须带有效兑换码 (服务端扣次, 不信任前端)
+    if ai_pixel:
+        _consume_license(license_code)
     try:
         outdir, stats = generate(img, width=width, mode=mode, metric=metric,
                                  series=series or None, n_colors=n_colors,

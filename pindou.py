@@ -392,13 +392,15 @@ def render_svg(idx_map, codes, pal_rgb, path, counts, src, params, layout="grid"
     overview → 总览页: 整图缩小 + 右侧大图例 (备料对色用)
     grid     → 施工图纸: 大格/每格色号/坐标/分板/图例"""
     from xml.sax.saxutils import escape
+    # AIGC 合规: AI 参与生成的图纸必须带标识 (人工智能生成合成内容标识办法)
+    ai_made = bool(params.get("ai_pixel", False))
+    ai_badge = (" · AI 生成" if ai_made else "")
     h, w = idx_map.shape
     total = int(idx_map.size)
     order = sorted(counts, key=lambda c: -counts[c])
     lookup = {c: i for i, c in enumerate(codes)}
     lum = pal_rgb @ np.array([0.299, 0.587, 0.114])
     flat = idx_map.ravel()
-
     if layout == "preview":
         cell, fs = 40, 13
         used = sorted(set(int(j) for j in flat))
@@ -419,6 +421,14 @@ def render_svg(idx_map, codes, pal_rgb, path, counts, src, params, layout="grid"
             s.append("".join(
                 f'<use xlink:href="#p{int(flat[base+xx])}" href="#p{int(flat[base+xx])}" '
                 f'x="{xx*cell}" y="{yy*cell}"/>' for xx in range(w)))
+        if ai_made:   # 预览图右下角 AI 标识角标
+            badge = "AI 生成"
+            bw_, bh_ = 86, 26
+            bx, by = w * cell - bw_ - 10, h * cell - bh_ - 10
+            s.append(f'<g><rect x="{bx}" y="{by}" width="{bw_}" height="{bh_}" rx="6" '
+                     f'fill="rgba(17,17,17,0.72)"/>'
+                     f'<text x="{bx + bw_/2}" y="{by + bh_/2 + 5}" text-anchor="middle" '
+                     f'font-size="13" fill="#fff">{badge}</text></g>')
         s.append('</g></svg>')
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(s))
@@ -443,7 +453,7 @@ def render_svg(idx_map, codes, pal_rgb, path, counts, src, params, layout="grid"
              f'<text x="30" y="30" font-size="20" font-weight="bold" fill="#111">'
              f'总览 · {escape(os.path.basename(src))}</text>',
              f'<text x="30" y="52" font-size="13" fill="#666">{w}×{h} 豆 · {total} 颗 · '
-             f'{len(counts)} 色 · 缩略仅对色, 施工请用 pattern_grid.svg</text>']
+             f'{len(counts)} 色{ai_badge} · 缩略仅对色, 施工请用 pattern_grid.svg</text>']
         used = sorted(set(int(j) for j in flat))
         s.append('<defs>')
         for j in used:
@@ -526,7 +536,7 @@ def render_svg(idx_map, codes, pal_rgb, path, counts, src, params, layout="grid"
     s.append(f'<text x="{ml}" y="30" font-size="20" font-weight="bold" fill="#111">'
              f'拼豆图纸 — {escape(os.path.basename(src))}</text>')
     s.append(f'<text x="{ml}" y="40" font-size="13" fill="#666">{w}×{h} 豆 · 共 {total} 颗 · '
-             f'{len(counts)} 色 · 模式 {params["mode"]} · 匹配 {params["metric"]} · '
+             f'{len(counts)} 色 · 模式 {params["mode"]} · 匹配 {params["metric"]}{ai_badge} · '
              f'MARD 色卡 · 每格 1 豆</text>')
     s.append('<g shape-rendering="crispEdges">')
     y0 = mt
@@ -645,6 +655,8 @@ def render_grid(idx_map, codes, pal_rgb, path):
 def render_html(idx_map, codes, pal_rgb, counts, out, src, params):
     h, w = idx_map.shape
     rows_per_page = 52
+    ai_made = bool(params.get("ai_pixel", False))
+    ai_badge = (" · <b style='color:#c0392b'>AI 生成</b>" if ai_made else "")
     css = ("body{font-family:-apple-system,'Hiragino Sans GB',sans-serif;margin:24px}"
            "table{border-collapse:collapse;table-layout:fixed}"
            "td{width:14px;height:14px;font-size:7px;line-height:14px;text-align:center;"
@@ -657,7 +669,7 @@ def render_html(idx_map, codes, pal_rgb, counts, out, src, params):
     html = [f"<!doctype html><meta charset='utf-8'><style>{css}</style>",
             f"<h1>拼豆图纸 — {os.path.basename(src)}</h1>"
             f"<div class='meta'>{w}×{h} 豆 · 共 {sum(counts.values())} 颗 · {len(counts)} 色 · "
-            f"模式 {params['mode']} · 匹配 {params['metric']} · MARD 色卡</div><div>"]
+            f"模式 {params['mode']} · 匹配 {params['metric']}{ai_badge} · MARD 色卡</div><div>"]
     for p0 in range(0, h, rows_per_page):
         html.append("<table>")
         for yy in range(p0, min(p0 + rows_per_page, h)):
